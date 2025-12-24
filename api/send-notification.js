@@ -21,12 +21,35 @@ function initFirebase() {
     });
     
     isFirebaseInitialized = true;
-    console.log('✅ Firebase Admin SDK подключен');
+    console.log('✅ Firebase Admin SDK подключен. Project ID:', serviceAccount.project_id);
     return true;
     
   } catch (error) {
     console.error('❌ Ошибка инициализации Firebase:', error.message);
     return false;
+  }
+}
+
+// Функция для детального логирования ошибок Firebase
+function logFirebaseErrorDetailed(error) {
+  console.error('🔥🔥🔥 ПОЛНАЯ ОШИБКА FCM 🔥🔥🔥');
+  console.error('🔴 Код ошибки:', error.code || 'Нет кода');
+  console.error('🔴 Сообщение ошибки:', error.message);
+  console.error('🔴 Детали ошибки:', error.details || 'Нет деталей');
+  console.error('🔴 Имя ошибки:', error.errorInfo?.code || 'Неизвестно');
+  console.error('🔴 HTTP код:', error.errorInfo?.status || 'Неизвестно');
+  
+  // Выводим всё что есть в ошибке
+  console.error('🔴 Весь объект ошибки:');
+  console.error(JSON.stringify(error, null, 2));
+  
+  // Проверяем специфические ошибки
+  if (error.code && error.code.includes('invalid-argument')) {
+    console.error('⚠️ ВОЗМОЖНЫЕ ПРИЧИНЫ INVALID_ARGUMENT:');
+    console.error('1. Неверный формат FCM токена (должен быть ~152 символа)');
+    console.error('2. Токен пустой или null');
+    console.error('3. Неправильная структура сообщения FCM');
+    console.error('4. Отсутствуют обязательные поля в сообщении');
   }
 }
 
@@ -57,24 +80,33 @@ module.exports = async (req, res) => {
   
   // Основной POST запрос
   if (req.method === 'POST') {
+    console.log('📨📨📨 НОВЫЙ ЗАПРОС НА УВЕДОМЛЕНИЕ 📨📨📨');
+    console.log('📅 Время:', new Date().toISOString());
+    console.log('📦 Тело запроса:', JSON.stringify(req.body, null, 2));
+    
     try {
       // Проверяем Firebase
       if (!initFirebase()) {
         return res.status(500).json({
           success: false,
-          error: 'Firebase не настроен. Проверь FIREBASE_SERVICE_ACCOUNT в настройках Vercel'
+          error: 'Firebase не настроен'
         });
       }
       
       // Получаем данные из запроса
       const { receiverToken, senderName, messageText, senderId, chatId } = req.body;
       
-      console.log('📨 Получен запрос на уведомление от:', senderName || 'Аноним');
-      console.log('📝 Токен получателя (первые 20 символов):', receiverToken ? receiverToken.substring(0, 20) + '...' : 'Нет токена');
-      console.log('📝 Текст сообщения:', messageText?.substring(0, 50) + (messageText?.length > 50 ? '...' : ''));
+      console.log('🔍 АНАЛИЗ ДАННЫХ:');
+      console.log('👤 Отправитель:', senderName || 'Не указан');
+      console.log('📝 Текст:', messageText || 'Нет текста');
+      console.log('🔑 Токен:', receiverToken ? `Длина: ${receiverToken.length} символов` : 'НЕТ ТОКЕНА!');
+      console.log('🔑 Начало токена:', receiverToken ? receiverToken.substring(0, 20) + '...' : 'Нет токена');
+      console.log('🔑 Конец токена:', receiverToken && receiverToken.length > 20 ? 
+        '...' + receiverToken.substring(receiverToken.length - 20) : 'Нет токена');
       
       // Валидация
       if (!receiverToken) {
+        console.error('❌ ОШИБКА: receiverToken отсутствует');
         return res.status(400).json({
           success: false,
           error: 'Нет receiverToken (токен устройства получателя)'
@@ -82,106 +114,88 @@ module.exports = async (req, res) => {
       }
       
       if (!messageText) {
+        console.error('❌ ОШИБКА: messageText отсутствует');
         return res.status(400).json({
           success: false,
           error: 'Нет текста сообщения'
         });
       }
       
-      // Создаем FCM сообщение
-      const message = {
-        token: receiverToken,
+      // Проверяем длину токена
+      if (receiverToken.length < 100) {
+        console.error(`⚠️ ПРЕДУПРЕЖДЕНИЕ: Токен слишком короткий (${receiverToken.length} символов). Должно быть ~152+`);
+      }
+      
+      // ТЕСТ 1: Упрощенное сообщение (минимальное)
+      console.log('🧪 ТЕСТ 1: Отправка УПРОЩЕННОГО сообщения...');
+      const simpleMessage = {
+        token: receiverToken.trim(), // удаляем пробелы по краям
         notification: {
-          title: senderName || 'Новое сообщение',
-          body: messageText.length > 100 
-            ? messageText.substring(0, 100) + '...' 
-            : messageText,
-          sound: 'default'
-        },
-        data: {
-          title: senderName || 'Новое сообщение',
-          body: messageText,
-          senderId: senderId || '',
-          chatId: chatId || '',
-          type: 'new_message',
-          timestamp: Date.now().toString(),
-          click_action: 'OPEN_CHAT_ACTION'
-        },
-        android: {
-          priority: 'high',
-          notification: {
-            channelId: 'messenger_channel',
-            sound: 'default',
-            icon: 'ic_notification',
-            color: '#2196F3'
-          }
+          title: senderName || 'Тест',
+          body: 'Тестовое уведомление'
         }
       };
       
-      console.log('🚀 Отправляю FCM сообщение...');
-      console.log('📋 Детали сообщения FCM:', {
-        tokenPreview: receiverToken.substring(0, 10) + '...' + receiverToken.substring(receiverToken.length - 5),
-        title: message.notification.title,
-        bodyPreview: message.notification.body,
-        data: message.data
-      });
+      console.log('📤 Упрощенное сообщение для отправки:');
+      console.log(JSON.stringify(simpleMessage, null, 2));
       
       try {
-        // Отправляем через Firebase Admin SDK с детальным логированием
-        console.log('⏳ Вызываю admin.messaging().send()...');
-        const response = await admin.messaging().send(message);
+        const simpleResponse = await admin.messaging().send(simpleMessage);
+        console.log('✅✅✅ ТЕСТ 1 УСПЕШЕН! Упрощенное сообщение отправлено!');
+        console.log('📦 Ответ FCM:', simpleResponse);
         
-        console.log('✅ Уведомление отправлено в FCM!');
-        console.log('📦 Ответ FCM:', {
-          messageId: response,
-          success: true
-        });
-        
-        // Успешный ответ
         return res.json({
           success: true,
-          message: 'Уведомление отправлено в FCM!',
-          messageId: response,
+          message: 'Тестовое уведомление отправлено!',
+          test: 'simple',
+          messageId: simpleResponse,
           debug: {
-            sender: senderName || 'Аноним',
-            textPreview: messageText.substring(0, 30) + '...',
-            timestamp: new Date().toISOString(),
-            fcmResponse: response
+            tokenLength: receiverToken.length,
+            tokenPreview: receiverToken.substring(0, 10) + '...' + receiverToken.substring(receiverToken.length - 10)
           }
         });
         
-      } catch (firebaseError) {
-        // Детальное логирование ошибки Firebase
-        console.error('🔥 ОШИБКА FCM (Firebase Cloud Messaging):');
-        console.error('🔴 Код ошибки:', firebaseError.code || 'Нет кода');
-        console.error('🔴 Сообщение ошибки:', firebaseError.message);
-        console.error('🔴 Полный объект ошибки:', firebaseError);
+      } catch (simpleError) {
+        console.error('❌❌❌ ТЕСТ 1 ПРОВАЛЕН с упрощенным сообщением');
+        logFirebaseErrorDetailed(simpleError);
         
-        // Разбираем распространённые ошибки FCM
-        let errorType = 'UNKNOWN';
-        let userMessage = firebaseError.message;
+        // ТЕСТ 2: Еще более простое сообщение
+        console.log('🧪 ТЕСТ 2: Пробуем САМОЕ ПРОСТОЕ сообщение...');
+        const minimalMessage = {
+          token: receiverToken.trim(),
+          data: {
+            test: 'true'
+          }
+        };
         
-        if (firebaseError.code === 'messaging/invalid-registration-token' || 
-            firebaseError.code === 'messaging/registration-token-not-registered') {
-          errorType = 'INVALID_TOKEN';
-          userMessage = 'Токен устройства недействителен или устарел. Нужно получить новый токен.';
-        } else if (firebaseError.code === 'messaging/mismatched-credential') {
-          errorType = 'WRONG_PROJECT';
-          userMessage = 'Ключ Firebase не соответствует проекту. Проверь FIREBASE_SERVICE_ACCOUNT.';
-        } else if (firebaseError.code === 'messaging/invalid-argument') {
-          errorType = 'INVALID_ARGUMENT';
-          userMessage = 'Неверные аргументы в запросе FCM.';
+        try {
+          const minimalResponse = await admin.messaging().send(minimalMessage);
+          console.log('✅✅✅ ТЕСТ 2 УСПЕШЕН! Data-only сообщение отправлено!');
+          
+          return res.json({
+            success: true,
+            message: 'Data-only уведомление отправлено',
+            test: 'minimal',
+            messageId: minimalResponse
+          });
+          
+        } catch (minimalError) {
+          console.error('❌❌❌ ТЕСТ 2 ПРОВАЛЕН с data-only сообщением');
+          logFirebaseErrorDetailed(minimalError);
+          
+          // Возвращаем детальную ошибку
+          return res.status(500).json({
+            success: false,
+            error: 'Ошибка FCM: ' + minimalError.message,
+            errorCode: minimalError.code || 'UNKNOWN',
+            errorDetails: minimalError.details || 'Нет деталей',
+            debug: {
+              tokenLength: receiverToken.length,
+              tokenValid: receiverToken.length > 100 ? 'Возможно' : 'Слишком короткий',
+              errorType: 'INVALID_ARGUMENT'
+            }
+          });
         }
-        
-        console.error('📊 Тип ошибки определен как:', errorType);
-        
-        return res.status(500).json({
-          success: false,
-          error: userMessage,
-          errorCode: firebaseError.code || 'UNKNOWN',
-          errorType: errorType,
-          details: 'Ошибка на стороне Firebase. Проверь токен устройства и ключ сервисного аккаунта.'
-        });
       }
       
     } catch (error) {
@@ -192,7 +206,7 @@ module.exports = async (req, res) => {
         success: false,
         error: error.message,
         code: error.code || 'UNKNOWN',
-        details: 'Общая ошибка сервера. Проверь логи на Vercel.'
+        details: 'Общая ошибка сервера'
       });
     }
   }
