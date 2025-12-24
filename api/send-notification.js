@@ -70,6 +70,8 @@ module.exports = async (req, res) => {
       const { receiverToken, senderName, messageText, senderId, chatId } = req.body;
       
       console.log('📨 Получен запрос на уведомление от:', senderName || 'Аноним');
+      console.log('📝 Токен получателя (первые 20 символов):', receiverToken ? receiverToken.substring(0, 20) + '...' : 'Нет токена');
+      console.log('📝 Текст сообщения:', messageText?.substring(0, 50) + (messageText?.length > 50 ? '...' : ''));
       
       // Валидация
       if (!receiverToken) {
@@ -117,32 +119,80 @@ module.exports = async (req, res) => {
       };
       
       console.log('🚀 Отправляю FCM сообщение...');
-      
-      // Отправляем через Firebase Admin SDK
-      const response = await admin.messaging().send(message);
-      
-      console.log('✅ Уведомление отправлено! ID:', response);
-      
-      // Успешный ответ
-      return res.json({
-        success: true,
-        message: 'Уведомление отправлено!',
-        messageId: response,
-        debug: {
-          sender: senderName || 'Аноним',
-          textPreview: messageText.substring(0, 30) + '...',
-          timestamp: new Date().toISOString()
-        }
+      console.log('📋 Детали сообщения FCM:', {
+        tokenPreview: receiverToken.substring(0, 10) + '...' + receiverToken.substring(receiverToken.length - 5),
+        title: message.notification.title,
+        bodyPreview: message.notification.body,
+        data: message.data
       });
       
+      try {
+        // Отправляем через Firebase Admin SDK с детальным логированием
+        console.log('⏳ Вызываю admin.messaging().send()...');
+        const response = await admin.messaging().send(message);
+        
+        console.log('✅ Уведомление отправлено в FCM!');
+        console.log('📦 Ответ FCM:', {
+          messageId: response,
+          success: true
+        });
+        
+        // Успешный ответ
+        return res.json({
+          success: true,
+          message: 'Уведомление отправлено в FCM!',
+          messageId: response,
+          debug: {
+            sender: senderName || 'Аноним',
+            textPreview: messageText.substring(0, 30) + '...',
+            timestamp: new Date().toISOString(),
+            fcmResponse: response
+          }
+        });
+        
+      } catch (firebaseError) {
+        // Детальное логирование ошибки Firebase
+        console.error('🔥 ОШИБКА FCM (Firebase Cloud Messaging):');
+        console.error('🔴 Код ошибки:', firebaseError.code || 'Нет кода');
+        console.error('🔴 Сообщение ошибки:', firebaseError.message);
+        console.error('🔴 Полный объект ошибки:', firebaseError);
+        
+        // Разбираем распространённые ошибки FCM
+        let errorType = 'UNKNOWN';
+        let userMessage = firebaseError.message;
+        
+        if (firebaseError.code === 'messaging/invalid-registration-token' || 
+            firebaseError.code === 'messaging/registration-token-not-registered') {
+          errorType = 'INVALID_TOKEN';
+          userMessage = 'Токен устройства недействителен или устарел. Нужно получить новый токен.';
+        } else if (firebaseError.code === 'messaging/mismatched-credential') {
+          errorType = 'WRONG_PROJECT';
+          userMessage = 'Ключ Firebase не соответствует проекту. Проверь FIREBASE_SERVICE_ACCOUNT.';
+        } else if (firebaseError.code === 'messaging/invalid-argument') {
+          errorType = 'INVALID_ARGUMENT';
+          userMessage = 'Неверные аргументы в запросе FCM.';
+        }
+        
+        console.error('📊 Тип ошибки определен как:', errorType);
+        
+        return res.status(500).json({
+          success: false,
+          error: userMessage,
+          errorCode: firebaseError.code || 'UNKNOWN',
+          errorType: errorType,
+          details: 'Ошибка на стороне Firebase. Проверь токен устройства и ключ сервисного аккаунта.'
+        });
+      }
+      
     } catch (error) {
-      console.error('❌ ОШИБКА отправки уведомления:', error);
+      console.error('❌ ОШИБКА отправки уведомления (общая):', error);
+      console.error('🔴 Стек вызовов:', error.stack);
       
       return res.status(500).json({
         success: false,
         error: error.message,
         code: error.code || 'UNKNOWN',
-        details: 'Проверь: 1) FIREBASE_SERVICE_ACCOUNT, 2) токен устройства, 3) интернет'
+        details: 'Общая ошибка сервера. Проверь логи на Vercel.'
       });
     }
   }
