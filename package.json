@@ -1,6 +1,6 @@
 {
   "name": "messenger-fcm-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Сервер для отправки FCM уведомлений Android мессенджера",
   "main": "api/send-notification.js",
   "scripts": {
